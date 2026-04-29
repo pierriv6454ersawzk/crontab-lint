@@ -1,89 +1,80 @@
 """Command-line interface for crontab-lint."""
+from __future__ import annotations
 
 import argparse
 import sys
-from typing import List, Optional
+from pathlib import Path
 
-from crontab_lint.parser import parse
 from crontab_lint.explainer import explain
+from crontab_lint.formatter import get_formatter
+from crontab_lint.parser import parse
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
+    p = argparse.ArgumentParser(
         prog="crontab-lint",
         description="Validate and explain crontab expressions.",
     )
-    parser.add_argument(
-        "expression",
-        nargs="?",
-        help="Crontab expression to validate (e.g. '*/5 * * * *').",
+    p.add_argument("expressions", nargs="*", metavar="EXPRESSION", help="Crontab expression(s) to check.")
+    p.add_argument("-f", "--file", metavar="FILE", help="File containing one expression per line.")
+    p.add_argument("--explain", action="store_true", default=False, help="Print a human-readable explanation.")
+    p.add_argument(
+        "--format",
+        choices=["text", "json"],
+        default="text",
+        dest="fmt",
+        help="Output format (default: text).",
     )
-    parser.add_argument(
-        "-f", "--file",
-        metavar="FILE",
-        help="Path to a crontab file; each non-comment line is validated.",
-    )
-    parser.add_argument(
-        "--no-explain",
-        action="store_true",
-        help="Suppress human-readable explanation; only show errors.",
-    )
-    parser.add_argument(
-        "--strict",
-        action="store_true",
-        help="Exit with non-zero status if any warnings are present.",
-    )
-    return parser
+    return p
 
 
-def _process_expression(expr: str, no_explain: bool) -> bool:
-    """Validate and optionally explain a single expression.
-    Returns True if valid (no errors), False otherwise."""
-    result = parse(expr)
-    if result.errors:
-        print(f"INVALID: {expr}")
-        for err in result.errors:
-            print(f"  error: {err}")
-        return False
-
-    if not no_explain:
-        print(f"OK: {expr}")
-        print(f"  {explain(result)}")
-    else:
-        print(f"OK: {expr}")
-    return True
+def _process_expression(
+    expression: str,
+    *,
+    show_explain: bool,
+    formatter,
+) -> bool:
+    """Parse, optionally explain, and print *expression*. Returns True if valid."""
+    result = parse(expression)
+    explanation = explain(result) if show_explain and result.valid else None
+    print(formatter.format_result(expression, result, explanation))
+    return result.valid
 
 
-def main(argv: Optional[List[str]] = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
 
-    if not args.expression and not args.file:
+    expressions: list[str] = list(args.expressions)
+
+    if args.file:
+        path = Path(args.file)
+        if not path.exists():
+            print(f"crontab-lint: file not found: {args.file}", file=sys.stderr)
+            return 2
+        for line in path.read_text().splitlines():
+            line = line.strip()
+            if line and not line.startswith("#"):
+                expressions.append(line)
+
+    if not expressions:
         parser.print_help()
         return 0
 
-    all_valid = True
+    formatter = get_formatter(args.fmt)
+    total = len(expressions)
+    invalid = 0
 
-    if args.file:
-        try:
-            with open(args.file) as fh:
-                lines = fh.readlines()
-        except OSError as exc:
-            print(f"crontab-lint: cannot open file: {exc}", file=sys.stderr)
-            return 2
+    for expr in expressions:
+        ok = _process_expression(expr, show_explain=args.explain, formatter=formatter)
+        if not ok:
+            invalid += 1
 
-        for raw in lines:
-            line = raw.strip()
-            if not line or line.startswith("#"):
-                continue
-            if not _process_expression(line, args.no_explain):
-                all_valid = False
-    elif args.expression:
-        if not _process_expression(args.expression, args.no_explain):
-            all_valid = False
+    if total > 1:
+        print(formatter.format_summary(total, invalid))
 
-    return 0 if all_valid else 1
+    return 0 if invalid == 0 else 1
 
 
-if __name__ == "__main__":  # pragma: no cover
+if __name__ == "__main__":
     sys.exit(main())
