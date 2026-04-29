@@ -1,57 +1,62 @@
-"""Output formatters for crontab-lint results."""
+"""Formatters for ParseResult / ValidationResult output."""
+
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import Any, Dict, List
 
-from crontab_lint.parser import ParseResult
+from .parser import ParseResult
 
 
-def _result_to_dict(expression: str, result: ParseResult, explanation: str | None = None) -> dict[str, Any]:
-    """Convert a ParseResult to a serialisable dictionary."""
-    data: dict[str, Any] = {
-        "expression": expression,
+def _result_to_dict(result: ParseResult, explanation: str | None = None) -> Dict[str, Any]:
+    d: Dict[str, Any] = {
+        "expression": result.expression,
         "valid": result.valid,
     }
-    if result.errors:
-        data["errors"] = result.errors
-    if explanation is not None:
-        data["explanation"] = explanation
-    return data
+    if result.error:
+        d["error"] = result.error
+    if explanation:
+        d["explanation"] = explanation
+    return d
 
 
 class TextFormatter:
-    """Plain-text formatter (default)."""
+    """Render results as human-readable text."""
 
-    def format_result(self, expression: str, result: ParseResult, explanation: str | None = None) -> str:
-        lines: list[str] = []
+    def format(self, result: ParseResult, explanation: str | None = None,
+               warnings: List[str] | None = None) -> str:
+        lines: List[str] = []
         status = "OK" if result.valid else "INVALID"
-        lines.append(f"{expression!r}  [{status}]")
-        for error in result.errors:
-            lines.append(f"  ERROR: {error}")
+        lines.append(f"{result.expression!r:40s}  [{status}]")
+        if result.error:
+            lines.append(f"  Error   : {result.error}")
         if explanation:
-            lines.append(f"  => {explanation}")
+            lines.append(f"  Meaning : {explanation}")
+        for w in (warnings or []):
+            lines.append(f"  Warning : {w}")
         return "\n".join(lines)
-
-    def format_summary(self, total: int, invalid: int) -> str:
-        valid = total - invalid
-        return f"\nSummary: {total} expression(s) checked — {valid} valid, {invalid} invalid."
 
 
 class JsonFormatter:
-    """JSON formatter (one object per expression, newline-delimited)."""
+    """Render results as JSON."""
 
-    def format_result(self, expression: str, result: ParseResult, explanation: str | None = None) -> str:
-        data = _result_to_dict(expression, result, explanation)
-        return json.dumps(data, ensure_ascii=False)
+    def format(self, result: ParseResult, explanation: str | None = None,
+               warnings: List[str] | None = None) -> str:
+        d = _result_to_dict(result, explanation)
+        if warnings:
+            d["warnings"] = warnings
+        return json.dumps(d, indent=2)
 
-    def format_summary(self, total: int, invalid: int) -> str:
-        summary = {"total": total, "valid": total - invalid, "invalid": invalid}
-        return json.dumps(summary, ensure_ascii=False)
+
+def format_result(result: ParseResult, explanation: str | None = None,
+                 warnings: List[str] | None = None,
+                 fmt: str = "text") -> str:
+    formatter = JsonFormatter() if fmt == "json" else TextFormatter()
+    return formatter.format(result, explanation, warnings)
 
 
-def get_formatter(fmt: str) -> TextFormatter | JsonFormatter:
-    """Return the appropriate formatter for *fmt* (``'text'`` or ``'json'``)."""
+def format_summary(total: int, invalid: int, fmt: str = "text") -> str:
+    valid = total - invalid
     if fmt == "json":
-        return JsonFormatter()
-    return TextFormatter()
+        return json.dumps({"total": total, "valid": valid, "invalid": invalid}, indent=2)
+    return f"\nSummary: {total} expression(s) — {valid} valid, {invalid} invalid."
