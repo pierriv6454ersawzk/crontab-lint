@@ -45,6 +45,16 @@ from crontab_lint import validate
 result = validate("0 9 * * 1-5")
 print(result.description)  # "At 09:00, Monday through Friday"
 print(result.is_valid)     # True
+print(result.next_runs)    # list of upcoming datetime objects
+```
+
+Check only whether an expression is valid without full parsing:
+
+```python
+from crontab_lint import is_valid
+
+if not is_valid("60 * * * *"):
+    print("Invalid crontab expression")
 ```
 
 ---
