@@ -88,3 +88,15 @@ def test_expression_preserved():
     parsed = _parse_ok(expr)
     result = next_schedule(parsed, after=FIXED_NOW)
     assert result.expression == expr
+
+
+def test_weekly_monday_noon_next_run():
+    """Verify that a weekly Monday-at-noon job schedules correctly.
+
+    FIXED_NOW is already Monday at 12:00:00, so the next run should be
+    the following Monday (2024-01-22) at 12:00.
+    """
+    parsed = _parse_ok("0 12 * * 1")
+    result = next_schedule(parsed, after=FIXED_NOW, count=1)
+    assert result.ok
+    assert result.next_runs[0] == datetime(2024, 1, 22, 12, 0, 0)
