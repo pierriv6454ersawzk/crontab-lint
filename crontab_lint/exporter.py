@@ -63,12 +63,39 @@ def export_csv(rows: List[ExportRow]) -> str:
     return output.getvalue()
 
 
+def export_summary(rows: List[ExportRow]) -> str:
+    """Return a plain-text summary of validation results.
+
+    Prints counts of valid/invalid expressions and lists any errors or
+    warnings grouped by expression.
+
+    Args:
+        rows: Export rows produced by :func:`export`.
+
+    Returns:
+        A human-readable summary string.
+    """
+    valid_count = sum(1 for r in rows if r.valid)
+    invalid_count = len(rows) - valid_count
+    lines = [
+        f"Total: {len(rows)}  Valid: {valid_count}  Invalid: {invalid_count}",
+    ]
+    for row in rows:
+        if row.errors or row.warnings:
+            lines.append(f"  {row.expression}")
+            for err in row.errors:
+                lines.append(f"    ERROR:   {err}")
+            for warn in row.warnings:
+                lines.append(f"    WARNING: {warn}")
+    return "\n".join(lines)
+
+
 def export(expressions: List[str], fmt: str = "json") -> str:
     """Validate and export a list of crontab expressions.
 
     Args:
         expressions: Raw crontab expression strings.
-        fmt: Output format, either ``'json'`` or ``'csv'``.
+        fmt: Output format, one of ``'json'``, ``'csv'``, or ``'summary'``.
 
     Returns:
         Formatted string in the requested format.
@@ -84,4 +111,6 @@ def export(expressions: List[str], fmt: str = "json") -> str:
 
     if fmt == "csv":
         return export_csv(rows)
+    if fmt == "summary":
+        return export_summary(rows)
     return export_json(rows)
