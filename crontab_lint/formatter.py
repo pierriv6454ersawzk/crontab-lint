@@ -1,62 +1,64 @@
-"""Formatters for ParseResult / ValidationResult output."""
+"""Formatters for cron lint results (text and JSON)."""
 
 from __future__ import annotations
 
 import json
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
-from .parser import ParseResult
+from crontab_lint.validator import ValidationResult
+from crontab_lint.schedule import ScheduleResult
 
 
-def _result_to_dict(result: ParseResult, explanation: str | None = None) -> Dict[str, Any]:
+def _result_to_dict(result: ValidationResult) -> Dict[str, Any]:
     d: Dict[str, Any] = {
         "expression": result.expression,
         "valid": result.valid,
     }
     if result.error:
         d["error"] = result.error
-    if explanation:
-        d["explanation"] = explanation
+    if result.warnings:
+        d["warnings"] = result.warnings
+    if result.explanation:
+        d["explanation"] = result.explanation
     return d
 
 
-class TextFormatter:
-    """Render results as human-readable text."""
+def _schedule_to_dict(schedule: ScheduleResult) -> Dict[str, Any]:
+    return {
+        "next_runs": [dt.isoformat() for dt in schedule.next_runs],
+        "error": schedule.error,
+    }
 
-    def format(self, result: ParseResult, explanation: str | None = None,
-               warnings: List[str] | None = None) -> str:
+
+class TextFormatter:
+    def format(
+        self,
+        result: ValidationResult,
+        schedule: Optional[ScheduleResult] = None,
+    ) -> str:
         lines: List[str] = []
         status = "OK" if result.valid else "INVALID"
-        lines.append(f"{result.expression!r:40s}  [{status}]")
+        lines.append(f"[{status}] {result.expression}")
         if result.error:
             lines.append(f"  Error   : {result.error}")
-        if explanation:
-            lines.append(f"  Meaning : {explanation}")
-        for w in (warnings or []):
+        for w in result.warnings or []:
             lines.append(f"  Warning : {w}")
+        if result.explanation:
+            lines.append(f"  Meaning : {result.explanation}")
+        if schedule and schedule.ok and schedule.next_runs:
+            lines.append("  Next runs:")
+            for dt in schedule.next_runs:
+                lines.append(f"    - {dt.strftime('%Y-%m-%d %H:%M')}")
         return "\n".join(lines)
 
 
 class JsonFormatter:
-    """Render results as JSON."""
-
-    def format(self, result: ParseResult, explanation: str | None = None,
-               warnings: List[str] | None = None) -> str:
-        d = _result_to_dict(result, explanation)
-        if warnings:
-            d["warnings"] = warnings
+    def format(
+        self,
+        result: ValidationResult,
+        schedule: Optional[ScheduleResult] = None,
+    ) -> str:
+        d = _result_to_dict(result)
+        if schedule:
+            d["schedule"] = _schedule_to_dict(schedule)
         return json.dumps(d, indent=2)
-
-
-def format_result(result: ParseResult, explanation: str | None = None,
-                 warnings: List[str] | None = None,
-                 fmt: str = "text") -> str:
-    formatter = JsonFormatter() if fmt == "json" else TextFormatter()
-    return formatter.format(result, explanation, warnings)
-
-
-def format_summary(total: int, invalid: int, fmt: str = "text") -> str:
-    valid = total - invalid
-    if fmt == "json":
-        return json.dumps({"total": total, "valid": valid, "invalid": invalid}, indent=2)
-    return f"\nSummary: {total} expression(s) — {valid} valid, {invalid} invalid."

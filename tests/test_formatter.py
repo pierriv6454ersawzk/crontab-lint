@@ -1,88 +1,96 @@
-"""Tests for crontab_lint.formatter."""
+"""Tests for crontab_lint.formatter (text and JSON output, including schedule)."""
+
+from __future__ import annotations
+
 import json
+from datetime import datetime
 
 import pytest
 
-from crontab_lint.formatter import JsonFormatter, TextFormatter, get_formatter
-from crontab_lint.parser import ParseResult
+from crontab_lint.validator import ValidationResult
+from crontab_lint.schedule import ScheduleResult
+from crontab_lint.formatter import TextFormatter, JsonFormatter
 
 
-@pytest.fixture()
-def valid_result():
-    return ParseResult(valid=True, fields={}, errors=[])
+@pytest.fixture
+def valid_result() -> ValidationResult:
+    return ValidationResult(
+        expression="0 9 * * 1",
+        valid=True,
+        error=None,
+        warnings=[],
+        explanation="At 09:00 on Monday.",
+    )
 
 
-@pytest.fixture()
-def invalid_result():
-    return ParseResult(valid=False, fields={}, errors=["minute value 99 out of range"])
+@pytest.fixture
+def invalid_result() -> ValidationResult:
+    return ValidationResult(
+        expression="99 * * * *",
+        valid=False,
+        error="Minute value 99 out of range.",
+        warnings=[],
+        explanation=None,
+    )
 
 
-# ---------------------------------------------------------------------------
-# TextFormatter
-# ---------------------------------------------------------------------------
+@pytest.fixture
+def sample_schedule() -> ScheduleResult:
+    runs = [
+        datetime(2024, 1, 15, 9, 0),
+        datetime(2024, 1, 22, 9, 0),
+    ]
+    return ScheduleResult(expression="0 9 * * 1", next_runs=runs)
+
 
 class TestTextFormatter:
     def test_valid_no_explanation(self, valid_result):
-        out = TextFormatter().format_result("0 * * * *", valid_result)
+        result = valid_result
+        result.explanation = None
+        out = TextFormatter().format(result)
         assert "[OK]" in out
-        assert "ERROR" not in out
+        assert "0 9 * * 1" in out
 
     def test_invalid_shows_error(self, invalid_result):
-        out = TextFormatter().format_result("99 * * * *", invalid_result)
+        out = TextFormatter().format(invalid_result)
         assert "[INVALID]" in out
-        assert "minute value 99 out of range" in out
+        assert "out of range" in out
 
-    def test_explanation_included(self, valid_result):
-        out = TextFormatter().format_result("0 * * * *", valid_result, explanation="every hour")
-        assert "every hour" in out
+    def test_explanation_shown(self, valid_result):
+        out = TextFormatter().format(valid_result)
+        assert "Meaning" in out
+        assert "09:00" in out
 
-    def test_summary(self):
-        out = TextFormatter().format_summary(total=5, invalid=2)
-        assert "5" in out
-        assert "3 valid" in out
-        assert "2 invalid" in out
+    def test_schedule_shown_in_text(self, valid_result, sample_schedule):
+        out = TextFormatter().format(valid_result, schedule=sample_schedule)
+        assert "Next runs" in out
+        assert "2024-01-15 09:00" in out
 
+    def test_no_schedule_no_next_runs_section(self, valid_result):
+        out = TextFormatter().format(valid_result, schedule=None)
+        assert "Next runs" not in out
 
-# ---------------------------------------------------------------------------
-# JsonFormatter
-# ---------------------------------------------------------------------------
 
 class TestJsonFormatter:
-    def test_valid_result_json(self, valid_result):
-        raw = JsonFormatter().format_result("0 * * * *", valid_result)
-        data = json.loads(raw)
+    def test_valid_json_structure(self, valid_result):
+        out = JsonFormatter().format(valid_result)
+        data = json.loads(out)
         assert data["valid"] is True
-        assert data["expression"] == "0 * * * *"
-        assert "errors" not in data
+        assert data["expression"] == "0 9 * * 1"
 
-    def test_invalid_result_json(self, invalid_result):
-        raw = JsonFormatter().format_result("99 * * * *", invalid_result)
-        data = json.loads(raw)
+    def test_invalid_json_has_error(self, invalid_result):
+        out = JsonFormatter().format(invalid_result)
+        data = json.loads(out)
         assert data["valid"] is False
-        assert len(data["errors"]) == 1
+        assert "error" in data
 
-    def test_explanation_in_json(self, valid_result):
-        raw = JsonFormatter().format_result("0 * * * *", valid_result, explanation="every hour")
-        data = json.loads(raw)
-        assert data["explanation"] == "every hour"
+    def test_schedule_included_in_json(self, valid_result, sample_schedule):
+        out = JsonFormatter().format(valid_result, schedule=sample_schedule)
+        data = json.loads(out)
+        assert "schedule" in data
+        assert len(data["schedule"]["next_runs"]) == 2
 
-    def test_summary_json(self):
-        raw = JsonFormatter().format_summary(total=4, invalid=1)
-        data = json.loads(raw)
-        assert data == {"total": 4, "valid": 3, "invalid": 1}
-
-
-# ---------------------------------------------------------------------------
-# get_formatter factory
-# ---------------------------------------------------------------------------
-
-def test_get_formatter_text():
-    assert isinstance(get_formatter("text"), TextFormatter)
-
-
-def test_get_formatter_json():
-    assert isinstance(get_formatter("json"), JsonFormatter)
-
-
-def test_get_formatter_default():
-    assert isinstance(get_formatter("unknown"), TextFormatter)
+    def test_no_schedule_key_when_omitted(self, valid_result):
+        out = JsonFormatter().format(valid_result)
+        data = json.loads(out)
+        assert "schedule" not in data
